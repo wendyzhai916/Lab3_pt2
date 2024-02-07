@@ -6,19 +6,15 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.metrics import mean_squared_error
 
-# Load data
 def load_portfolio():
     query = "SELECT Date, Close_price FROM portfolio_data"
     portfolio_data = pd.read_sql(query, engine)
-
-    # Data preprocessing
     portfolio_data['Date'] = pd.to_datetime(portfolio_data['Date'])
     portfolio_data.set_index('Date', inplace=True)
 
 train_size = int(len(data) * 0.8)
 train_data, test_data = data[:train_size], data[train_size:]
 
-# Scaling
 scaler = MinMaxScaler()
 train_data_scaled = scaler.fit_transform(train_data)
 test_data_scaled = scaler.transform(test_data)
@@ -34,7 +30,6 @@ time_steps = 60
 X_train, y_train = create_dataset(train_data_scaled, time_steps)
 X_test, y_test = create_dataset(test_data_scaled, time_steps)
 
-# Reshape data for LSTM input (samples, time steps, features)
 X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
 X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
 
@@ -56,7 +51,6 @@ y_test = scaler.inverse_transform(y_test.reshape(-1, 1))
 rmse = np.sqrt(mean_squared_error(y_test, predictions))
 print('Root Mean Squared Error (RMSE):', rmse)
 
-# Prediction
 x_input = test_data_scaled[-time_steps:].reshape(1, -1)
 temp_input = list(x_input)
 temp_input = temp_input[0].tolist()
