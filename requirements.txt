@@ -1,0 +1,7 @@
+prettytable
+sqlalchemy
+pandas
+numpy
+tensorflow
+mysql-connector-python
+yfinance
