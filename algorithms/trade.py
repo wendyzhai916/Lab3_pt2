@@ -243,6 +243,29 @@ class Portfolio:
         print('\n')
         return 
     
+    def stock_metrics():
+        '''
+        Print out annualized returns of all the stocks in the profolio using dates one year from now.
+        '''
+        stock_list = self.stocks.keys()
+        today_date = datetime.today()
+        start_date = today_date - timedelta(days=356)
+        annual_return = []
+        sharpe_ratio = []
+        rfr = 0.03
+        trading_days = 252
+    
+        for stock in stock_list:
+            data = yf.download(stock, start=start_date.strftime("%Y-%m-%d"), end=today_date.strftime("%Y-%m-%d"))
+       	    data['Daily Returns'] = data['Close'] - data['Open']
+            data['Percent Change'] = round(data['Daily Returns']/data['Open']*100,2)
+            annual_return.append(data['Percent Change'].mean()*trading_days)
+            sharpe_ratio.append((np.mean(data['Daily Returns'])*trading_days-rfr)/(np.std(data['Daily Returns'])*np.sqrt(trading_days)))
+                           
+        return_df = pd.DataFrame({'Tickers': stock_list, 'Annualized Returns':annual_return}, 'Sharpe Ratio': sharpe_ratio)
+    	print("The stock metrics are: ")
+        print(return_df)
+
 
 if __name__ == '__main__':
 
