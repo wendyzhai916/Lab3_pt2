@@ -1,20 +1,63 @@
 import yfinance as yf
+import pandas as pd
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from datetime import datetime, timedelta
 
 def forecast_price(purchase_date, ticker):
+    purchase_date = datetime.strptime(purchase_date, "%Y-%m-%d")
+    start_date = purchase_date - timedelta(days=365)
+    stock_data = yf.download(ticker, period="ld", start = start_date,  end = purchase_date, progress = False)
+    stock_data = stock_data[['Open']].reset_index()
+    # prepare data for LSTM
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(stock_data['Open'].values.reshape(-1,1))
+    sequence_length = 20
+    # split train and test:
+    sequences = []
+    target = []
+    for i in range(len(scaled_data) - sequence_length):
+        sequences.append(scaled_data[i:i+sequence_length])
+        target.append(scaled_data[i+sequence_length])
+    x = np.array(sequences)
+    y = np.array(target)
+    split_ratio = 0.8
+    split_index = int(len(x) * split_ratio)
+    x_train, x_test = x[:split_index], x[split_index:]
+    y_train, y_test = y[:split_index], y[split_index:]
+    # build LSTM model
+    model = tf.keras.Sequential([tf.keras.layers.LSTM(50, activation='relu', input_shape=(sequence_length, 1)), tf.keras.layers.Dense(1)])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(x_train, y_train, epochs=10, batch_size=32, validation_data=(x_test,y_test), verbose=0)
+    future_days = 7
+    forecasted_prices = []
+    latest_data = stock_data[-sequence_length:]
+
+    for _ in range(future_days):
+        latest_scaled_data = scaler.transform(latest_data['Open'].values.reshape(-1,1))
+        X_latest = np.array([latest_scaled_data])
+        predicted_price = model.predict(X_latest, verbose=0)
+        predicted_price = scaler.inverse_transform(predicted_price)[0][0]
+        forecasted_prices.append(predicted_price)
+        latest_data = pd.concat([latest_data, pd.DataFrame({'Date': [latest_data['Date'].iloc[-1] + pd.DateOffset(1)], 'Open': [predicted_price]})], ignore_index=True)
+
     return latest_data
 
 
 def current_price(ticker, date):
     forecast_result = forecast_price(datetime.today().strftime("%Y-%m-%d"), ticker)
-    date_price_dict = forecast_result.set_index('Date')['open'].to_dict()
+    date_price_dict = forecast_result.set_index('Date')['Open'].to_dict()
     date_price_dict = {str(key.date()) : value for key,value in date_price_dict.items()}
     current_price = date_price_dict[date]
     return current_price
 
 
 class Portfolio:
-    def _init_(self, name, initial_asset):
+    def __init__(self, name, initial_asset):
         self.name = name
         self.initial_asset = initial_asset
         self.total_investment = initial_asset
@@ -22,6 +65,7 @@ class Portfolio:
         self.stock_holdings = {}
 
         ticker_input = input("Please enter the stock tickers interested in (split by \','\, eg. AAPL,MSFT): ")
+        print('\n')
         tickers = [ticker.strip().upper() for ticker in ticker_input.split(',')]
 
         for ticker in tickers:
@@ -34,8 +78,9 @@ class Portfolio:
             except Exception as e:
                 print(f"Error fetching {ticker}. Error: {e}")
 
-        print(self.stocks)
+        # print(self.stocks)
         print(f"Portfolio {self.name} created successfully")
+        print('\n')
 
 
     def forecast_all_stocks(self, ticker = None):
@@ -53,6 +98,7 @@ class Portfolio:
             forecast = forecast_price(datetime.today().strftime("%Y-%m-%d"), t)
             # filter data within 7 days
             forecast = forecast[(forecast['Date'] > start_date) & (forecast['Date'] <= end_date)]
+            #print(forecast)
             # convert  data index to string format for better representation
             forecast['Date'] = forecast['Date'].dt.strftime('%Y-%m-%d')
             forecast_dict = forecast.set_index('Date')['Open'].to_dict()
@@ -90,11 +136,13 @@ class Portfolio:
         purchase_date = input(f"Enter the date (from the above) that you wish to buy the stock {ticker}(YYYY-MM-DD): ")
         if purchase_date not in forecast_prices:
             print("The date you entered is invalid")
+            return
         try:
             quantity = int(input(f"Please input the shares number of {ticker} you wish to buy: "))
             purchase_price = forecast_prices[purchase_date] * quantity
             if purchase_price > self.total_investment:
                 print(f"You don't have enough money remained to buy {quantity} shares of {ticker}")
+                return
             # update Portfolio variable
             self.total_investment = self.total_investment - purchase_price
             if ticker in self.stock_holdings:
@@ -153,7 +201,7 @@ class Portfolio:
         self.stock_holdings[ticker] -= quantity
         if self.stock_holdings[ticker] <= 0:
             del self.stock_holdings[ticker]
-        print(f"Successfully sold {quantity} shares of {ticker} on {sell_date}, using dollars: ${transaction_value:.2f}")
+        print(f"Successfully sold {quantity} shares of {ticker} on {sell_date}, receiving dollars: ${transaction_value:.2f}")
         print(f"The total investment assets after this selling: {self.total_investment}")
 
         # adjust the price for the next day
@@ -163,25 +211,28 @@ class Portfolio:
         # current portfolio value
         portfolio_value = self.total_investment
         for stock, amount in self.stock_holdings.items():
-            portfolio_value = portfolio_value + amount * self.stocks(stock, 0)
+            portfolio_value = portfolio_value + amount * self.stocks[stock]
 
         print(f"The current portfolio value is ${portfolio_value:.2f}")
+        print('\n')
 
     
     def get_portfolio_value(self, date):
         start_date = datetime.today()
         end_date = start_date + timedelta(days=7)
-        # convert string to datetime
+        # convert string to datetime 
+        input_date = date.strip()
         input_date = datetime.strptime(date, "%Y-%m-%d")
         if input_date < start_date or input_date > end_date:
             print(f"Error. The date you provided is out of prediction range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ")
             return
         stock_value = 0
         # calculate the value of each stock based on the input date
+        print('The stocks holdings information: ')
         for ticker, quantity in self.stock_holdings.items():
             stock_price = current_price(ticker, date)
             stock_value += quantity * stock_price
-            print(f"Stock Name: {ticker}, Share Amount: {quantity}, Total Accumulative Values: {stock_price:.2f}")
+            print(f"Stock Name: {ticker}, Share Amount: {quantity}, Stock Values of the input date: {stock_price:.2f}")
         # compute total value of stoks in the portfolio
         total_asset = self.total_investment + stock_value
         # calculate overall profit
@@ -189,6 +240,7 @@ class Portfolio:
 
         print(f"The total profit of Portfolio {self.name} is: {profit:.2f}")
         print(f"Profit = total_asset - initial_asset = ({self.total_investment:.2f} + {stock_value:.2f}) - {self.initial_asset}")
+        print('\n')
         return 
     
 
@@ -203,14 +255,13 @@ if __name__ == '__main__':
         print('4. Display profits of the portfolio')
         print('5. Show evaluation metrics ')
         print('6. Exit the system')
-        print('\n')
         print('-------------------LET\'S GET STARTED-------------------')
-
+        print('\n')
         choice = input("Please enter your choice of the options: ")
 
         if choice == "1":
-            initial_investment = float(input("Please type in your initial investment amout： "))
-            port_name = input("Please type in your portfolio name： ")
+            initial_investment = float(input("Please type in your initial investment amout: "))
+            port_name = input("Please type in your portfolio name: ")
             portfolio = Portfolio(port_name, initial_investment)
 
         elif choice == "2":
@@ -220,7 +271,7 @@ if __name__ == '__main__':
             portfolio.sell_stock()
 
         elif choice == "4":
-            date = input(f"Please input a date that you wish to see the total profit of {port_name}")
+            date = input(f"Please input a date that you wish to see the total profit of {port_name}: ")
             portfolio.get_portfolio_value(date)
 
         elif choice == "5":
